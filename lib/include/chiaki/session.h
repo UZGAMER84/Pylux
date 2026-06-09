@@ -99,6 +99,9 @@ typedef struct chiaki_connect_info_t
 	uint32_t cloud_mtu_in; // MTU in from ping results (0 if not set, will use default)
 	uint32_t cloud_mtu_out; // MTU out from ping results (0 if not set, will use default)
 	uint64_t cloud_rtt_us; // RTT in microseconds from ping results (0 if not set, will use default)
+	uint16_t session_port; // Remote Play session/control port (0 = 9295)
+	uint16_t stream_port; // Takion stream port (0 = 9296)
+	uint16_t senkusha_port; // Senkusha bootstrap port (0 = 9297)
 } ChiakiConnectInfo;
 
 
@@ -231,6 +234,9 @@ typedef struct chiaki_session_t
 		bool enable_keyboard;
 		bool enable_dualsense;
 		uint8_t psn_account_id[CHIAKI_PSN_ACCOUNT_ID_SIZE];
+		uint16_t session_port;
+		uint16_t stream_port;
+		uint16_t senkusha_port;
 	} connect_info;
 
 	ChiakiTarget target;

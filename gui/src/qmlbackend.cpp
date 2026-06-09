@@ -1668,6 +1668,28 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
                     QStringLiteral("publicHost") })).toString().trimmed();
     const QString slotId = cloudplayFirstValue(session, { QStringLiteral("slot_id"), QStringLiteral("slotId"), QStringLiteral("slot") }).toString();
     const QString displayName = cloudplayFirstValue(session, { QStringLiteral("display_name"), QStringLiteral("displayName"), QStringLiteral("name") }).toString();
+    const int ctrlPort = cloudplayFirstValue(connect, {
+            QStringLiteral("ctrl_port"), QStringLiteral("ctrlPort"),
+            QStringLiteral("control_port"), QStringLiteral("controlPort"),
+            QStringLiteral("session_port"), QStringLiteral("sessionPort"),
+            QStringLiteral("remote_port"), QStringLiteral("remotePort") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("ctrl_port"), QStringLiteral("ctrlPort"),
+                    QStringLiteral("control_port"), QStringLiteral("controlPort"),
+                    QStringLiteral("session_port"), QStringLiteral("sessionPort"),
+                    QStringLiteral("remote_port"), QStringLiteral("remotePort") }, 9295)).toInt();
+    const int streamPort = cloudplayFirstValue(connect, {
+            QStringLiteral("stream_port"), QStringLiteral("streamPort"),
+            QStringLiteral("video_port"), QStringLiteral("videoPort") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("stream_port"), QStringLiteral("streamPort"),
+                    QStringLiteral("video_port"), QStringLiteral("videoPort") }, 9296)).toInt();
+    const int senkushaPort = cloudplayFirstValue(connect, {
+            QStringLiteral("senkusha_port"), QStringLiteral("senkushaPort"),
+            QStringLiteral("control_udp_port"), QStringLiteral("controlUdpPort") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("senkusha_port"), QStringLiteral("senkushaPort"),
+                    QStringLiteral("control_udp_port"), QStringLiteral("controlUdpPort") }, 9297)).toInt();
     const QString launchSpec = cloudplayFirstValue(connect, {
             QStringLiteral("launch_spec"), QStringLiteral("launchSpec"), QStringLiteral("cloud_launch_spec"), QStringLiteral("cloudLaunchSpec") },
             cloudplayFirstValue(session, {
@@ -1765,7 +1787,7 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
 
     QString hostWithPort = publicHost;
     if (!hostWithPort.contains(QLatin1Char(':')))
-        hostWithPort = QStringLiteral("%1:%2").arg(publicHost).arg(cloudPort);
+        hostWithPort = QStringLiteral("%1:%2").arg(publicHost).arg(ctrlPort > 0 ? ctrlPort : 9295);
 
     StreamSessionConnectInfo info(
             settings,
@@ -1780,6 +1802,10 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             fullscreen,
             zoom,
             stretch);
+
+    info.ctrl_port = ctrlPort > 0 ? static_cast<uint16_t>(ctrlPort) : 0;
+    info.stream_port = streamPort > 0 ? static_cast<uint16_t>(streamPort) : 0;
+    info.senkusha_port = senkushaPort > 0 ? static_cast<uint16_t>(senkushaPort) : 0;
 
     if (!launchSpec.isEmpty() || !handshakeKey.isEmpty()) {
         if (serviceTypeStr == QLatin1String("psnow"))
@@ -1799,6 +1825,9 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
 
     qCInfo(chiakiGui) << "CloudPlay Pylux handoff"
                        << "host" << publicHost
+                       << "ctrlPort" << ctrlPort
+                       << "streamPort" << streamPort
+                       << "senkushaPort" << senkushaPort
                        << "cloudPort" << cloudPort
                        << "service" << serviceTypeStr
                        << "hasLaunch" << !launchSpec.isEmpty()

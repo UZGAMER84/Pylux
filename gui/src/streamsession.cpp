@@ -286,6 +286,9 @@ StreamSession::StreamSession(const StreamSessionConnectInfo &connect_info, QObje
 	ChiakiConnectInfo chiaki_connect_info = {};
 	chiaki_connect_info.ps5 = chiaki_target_is_ps5(connect_info.target);
 	chiaki_connect_info.host = host_str.constData();
+	chiaki_connect_info.session_port = connect_info.ctrl_port;
+	chiaki_connect_info.stream_port = connect_info.stream_port;
+	chiaki_connect_info.senkusha_port = connect_info.senkusha_port;
 	chiaki_connect_info.video_profile = connect_info.video_profile;
 	chiaki_connect_info.video_profile_auto_downgrade = true;
 	// Only enable PS5 keyboard dialog support when launching a game

@@ -160,9 +160,9 @@ CHIAKI_EXPORT ChiakiErrorCode chiaki_stream_connection_run(ChiakiStreamConnectio
 		memcpy(takion_info.sa, session->connect_info.host_addrinfo_selected->ai_addr, takion_info.sa_len);
 		// Cloud streaming: use API-provided port, Remote play: use default port
 		const bool is_cloud = chiaki_service_type_is_cloud(session->service_type);
-		uint16_t port = (is_cloud && session->cloud_port > 0) ? session->cloud_port : STREAM_CONNECTION_PORT;
-		CHIAKI_LOGI(session->log, "Setting Takion connection port=%u (service_type=%s, cloud_port=%u)", 
-			port, chiaki_service_type_string(session->service_type), session->cloud_port);
+		uint16_t port = (is_cloud && session->cloud_port > 0) ? session->cloud_port : (session->connect_info.stream_port ? session->connect_info.stream_port : STREAM_CONNECTION_PORT);
+		CHIAKI_LOGI(session->log, "Setting Takion connection port=%u (service_type=%s, cloud_port=%u, stream_port=%u)",
+			port, chiaki_service_type_string(session->service_type), session->cloud_port, session->connect_info.stream_port);
 		err = set_port(takion_info.sa, htons(port));
 		assert(err == CHIAKI_ERR_SUCCESS);
 	}

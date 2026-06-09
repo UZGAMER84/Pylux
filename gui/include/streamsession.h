@@ -125,6 +125,9 @@ struct StreamSessionConnectInfo
 	uint32_t cloud_mtu_in; // MTU in from ping results (0 if not set)
 	uint32_t cloud_mtu_out; // MTU out from ping results (0 if not set)
 	uint64_t cloud_rtt_us; // RTT in microseconds from ping results (0 if not set)
+	uint16_t ctrl_port = 0;
+	uint16_t stream_port = 0;
+	uint16_t senkusha_port = 0;
 
 	StreamSessionConnectInfo() {}
 	StreamSessionConnectInfo(
