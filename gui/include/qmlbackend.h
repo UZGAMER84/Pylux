@@ -248,6 +248,9 @@ public:
     Q_INVOKABLE QString getPyluxURL();
     Q_INVOKABLE void createPyluxCode(const QString &code, const QJSValue &callback);
     Q_INVOKABLE void checkPyluxStatus(const QString &code, const QJSValue &callback);
+    Q_INVOKABLE bool cloudPlayCanReach(const QString &host, int port, int timeoutMs = 1800);
+    Q_INVOKABLE bool cloudPlayStartStream(const QVariantMap &sessionPayload);
+    Q_INVOKABLE bool cloudPlayEnvFlag(const QString &name) const;
 #if CHIAKI_GUI_ENABLE_STEAM_SHORTCUT
     Q_INVOKABLE QString getSteamBaseDir();
     QString getSteamUserId();
@@ -298,6 +301,8 @@ signals:
     void wakeupStartInitiated();
     void wakeupStartFailed();
     void windowTypeUpdated(WindowType type);
+    void cloudPlayNativeConnected();
+    void cloudPlayNativeSessionQuit();
 
     void error(const QString &title, const QString &text);
     void error(const QString &title, const QString &text, int durationMs);

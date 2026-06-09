@@ -50,6 +50,7 @@
 #include <QSet>
 #include <QDateTime>
 #include <QTimer>
+#include <QTcpSocket>
 #include <QUuid>
 #include <algorithm>
 
@@ -210,6 +211,7 @@ QmlBackend::QmlBackend(Settings *settings, QmlMainWindow *window, SteamworksWrap
             session->deleteLater();
             session = nullptr;
             emit sessionChanged(session);
+            emit cloudPlayNativeSessionQuit();
 
             sleep_inhibit->release();
             setDiscoveryEnabled(true);
@@ -217,8 +219,10 @@ QmlBackend::QmlBackend(Settings *settings, QmlMainWindow *window, SteamworksWrap
 
         // Connect discovery state handler
         connect(session, &StreamSession::ConnectedChanged, this, [this]() {
-            if (session->IsConnected())
+            if (session->IsConnected()) {
                 setDiscoveryEnabled(false);
+                emit cloudPlayNativeConnected();
+            }
         });
         
         // Notify QML that session is available
@@ -1170,6 +1174,7 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         session->deleteLater();
         session = nullptr;
         emit sessionChanged(session);
+        emit cloudPlayNativeSessionQuit();
 
         sleep_inhibit->release();
         setDiscoveryEnabled(true);
@@ -1204,8 +1209,10 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
     connect(session, &StreamSession::AutoRegistSucceeded, this, &QmlBackend::finishAutoRegister);
 
     connect(session, &StreamSession::ConnectedChanged, this, [this]() {
-        if (session->IsConnected())
+        if (session->IsConnected()) {
             setDiscoveryEnabled(false);
+            emit cloudPlayNativeConnected();
+        }
     });
 
     if (window->windowState() != Qt::WindowFullScreen)
@@ -1536,6 +1543,274 @@ void QmlBackend::setWebEngineHints(QQuickWebEngineProfile *profile)
     profile->setUrlRequestInterceptor(request_interceptor);
 }
 #endif
+
+static QByteArray cloudplayProfileKeyBytes(QString value, int expectedSize)
+{
+    const QString raw = value.trimmed();
+    QString compact = raw;
+    compact.remove(QLatin1Char(':'));
+    compact.remove(QLatin1Char('-'));
+    compact.remove(QLatin1Char(' '));
+    compact.remove(QLatin1Char('\n'));
+    compact.remove(QLatin1Char('\r'));
+    compact.remove(QLatin1Char('\t'));
+
+    bool looksHex = !compact.isEmpty() && compact.size() % 2 == 0;
+    for (const QChar ch : compact) {
+        if (!ch.isDigit() && (ch.toLower() < QLatin1Char('a') || ch.toLower() > QLatin1Char('f'))) {
+            looksHex = false;
+            break;
+        }
+    }
+
+    if (looksHex) {
+        const QByteArray hex = QByteArray::fromHex(compact.toUtf8());
+        if (expectedSize <= 0 || hex.size() == expectedSize)
+            return hex;
+    }
+
+    const QByteArray b64 = QByteArray::fromBase64(raw.toUtf8());
+    if (expectedSize <= 0 || b64.size() == expectedSize)
+        return b64;
+
+    QString padded = raw;
+    padded.replace(QLatin1Char('-'), QLatin1Char('+'));
+    padded.replace(QLatin1Char('_'), QLatin1Char('/'));
+    while (padded.size() % 4 != 0)
+        padded.append(QLatin1Char('='));
+    return QByteArray::fromBase64(padded.toUtf8());
+}
+
+static QVariant cloudplayFirstValue(const QVariantMap &map, std::initializer_list<QString> keys, const QVariant &fallback = QVariant())
+{
+    for (const QString &key : keys) {
+        const QVariant value = map.value(key);
+        if (value.isValid() && !value.toString().isEmpty())
+            return value;
+    }
+    return fallback;
+}
+
+static QVariantMap cloudplayFirstMap(const QVariantMap &map, std::initializer_list<QString> keys)
+{
+    for (const QString &key : keys) {
+        const QVariant value = map.value(key);
+        if (value.isValid() && value.canConvert<QVariantMap>()) {
+            const QVariantMap nested = value.toMap();
+            if (!nested.isEmpty())
+                return nested;
+        }
+    }
+    return QVariantMap();
+}
+
+static QVariantMap cloudplayNormalizeSessionPayload(QVariantMap payload)
+{
+    for (int i = 0; i < 4; ++i) {
+        const QVariantMap nested = cloudplayFirstMap(payload, {
+                QStringLiteral("session"), QStringLiteral("launch_session"), QStringLiteral("launchSession"),
+                QStringLiteral("ready_session"), QStringLiteral("readySession"), QStringLiteral("data"),
+                QStringLiteral("result"), QStringLiteral("payload") });
+        if (nested.isEmpty() || nested == payload)
+            break;
+        payload = nested;
+    }
+    return payload;
+}
+
+static QVariantMap cloudplayConnectPayload(const QVariantMap &session)
+{
+    QVariantMap connect = cloudplayFirstMap(session, {
+            QStringLiteral("connect"), QStringLiteral("launch"), QStringLiteral("stream"), QStringLiteral("connection") });
+    if (connect.isEmpty())
+        connect = session;
+    return connect;
+}
+
+bool QmlBackend::cloudPlayEnvFlag(const QString &name) const
+{
+    const QString value = QProcessEnvironment::systemEnvironment().value(name).trimmed().toLower();
+    return value == QStringLiteral("1") || value == QStringLiteral("true") || value == QStringLiteral("yes") || value == QStringLiteral("on");
+}
+
+bool QmlBackend::cloudPlayCanReach(const QString &host, int port, int timeoutMs)
+{
+    const QString cleanHost = host.trimmed();
+    if (cleanHost.isEmpty() || port <= 0)
+        return false;
+    QTcpSocket socket;
+    socket.connectToHost(cleanHost, static_cast<quint16>(port));
+    return socket.waitForConnected(timeoutMs > 0 ? timeoutMs : 1800);
+}
+
+bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
+{
+    const QVariantMap session = cloudplayNormalizeSessionPayload(sessionPayload);
+    const QVariantMap connect = cloudplayConnectPayload(session);
+    QVariantMap profileMap = cloudplayFirstMap(connect, {
+            QStringLiteral("profile"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob") });
+    if (profileMap.isEmpty())
+        profileMap = cloudplayFirstMap(session, { QStringLiteral("profile"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob") });
+
+    const QString profileBlob = cloudplayFirstValue(connect, {
+            QStringLiteral("profile_blob"), QStringLiteral("profileBlob"), QStringLiteral("profile"),
+            QStringLiteral("profile_data"), QStringLiteral("profileData") },
+            cloudplayFirstValue(profileMap, {
+                    QStringLiteral("blob"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob"),
+                    QStringLiteral("data"), QStringLiteral("base64") })).toString().trimmed();
+    const QString publicHost = cloudplayFirstValue(connect, {
+            QStringLiteral("host"), QStringLiteral("external_host"), QStringLiteral("externalHost"),
+            QStringLiteral("remote_host"), QStringLiteral("remoteHost"), QStringLiteral("public_host"),
+            QStringLiteral("publicHost"), QStringLiteral("address"), QStringLiteral("addr") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("host"), QStringLiteral("external_host"), QStringLiteral("externalHost"),
+                    QStringLiteral("remote_host"), QStringLiteral("remoteHost"), QStringLiteral("public_host"),
+                    QStringLiteral("publicHost") })).toString().trimmed();
+    const QString slotId = cloudplayFirstValue(session, { QStringLiteral("slot_id"), QStringLiteral("slotId"), QStringLiteral("slot") }).toString();
+    const QString displayName = cloudplayFirstValue(session, { QStringLiteral("display_name"), QStringLiteral("displayName"), QStringLiteral("name") }).toString();
+    const QString launchSpec = cloudplayFirstValue(connect, {
+            QStringLiteral("launch_spec"), QStringLiteral("launchSpec"), QStringLiteral("cloud_launch_spec"), QStringLiteral("cloudLaunchSpec") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("launch_spec"), QStringLiteral("launchSpec"), QStringLiteral("cloud_launch_spec"), QStringLiteral("cloudLaunchSpec") })).toString().trimmed();
+    const QString handshakeKey = cloudplayFirstValue(connect, {
+            QStringLiteral("handshake_key"), QStringLiteral("handshakeKey"), QStringLiteral("cloud_handshake_key"), QStringLiteral("cloudHandshakeKey") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("handshake_key"), QStringLiteral("handshakeKey"), QStringLiteral("cloud_handshake_key"), QStringLiteral("cloudHandshakeKey") })).toString().trimmed();
+    const QString cloudSessionId = cloudplayFirstValue(connect, {
+            QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") })).toString().trimmed();
+    const QString serviceTypeStr = cloudplayFirstValue(connect, {
+            QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") },
+            cloudplayFirstValue(session, { QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") }, QStringLiteral("pscloud"))).toString().trimmed().toLower();
+    const int cloudPort = cloudplayFirstValue(connect, {
+            QStringLiteral("server_port"), QStringLiteral("serverPort"), QStringLiteral("cloud_port"), QStringLiteral("cloudPort"), QStringLiteral("port"),
+            QStringLiteral("stream_port"), QStringLiteral("streamPort"), QStringLiteral("video_port"), QStringLiteral("videoPort") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("server_port"), QStringLiteral("serverPort"), QStringLiteral("cloud_port"), QStringLiteral("cloudPort"), QStringLiteral("port"),
+                    QStringLiteral("stream_port"), QStringLiteral("streamPort"), QStringLiteral("video_port"), QStringLiteral("videoPort") }, 0)).toInt();
+    const QString privateIp = cloudplayFirstValue(connect, {
+            QStringLiteral("private_ip"), QStringLiteral("privateIp"), QStringLiteral("psn_private_ip"), QStringLiteral("psnPrivateIp") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("private_ip"), QStringLiteral("privateIp"), QStringLiteral("psn_private_ip"), QStringLiteral("psnPrivateIp") })).toString().trimmed();
+    int psnWrapperType = cloudplayFirstValue(connect, {
+            QStringLiteral("psn_wrapper_type"), QStringLiteral("psnWrapperType"), QStringLiteral("cloud_psn_wrapper_type"), QStringLiteral("cloudPsnWrapperType") },
+            cloudplayFirstValue(session, {
+                    QStringLiteral("psn_wrapper_type"), QStringLiteral("psnWrapperType"), QStringLiteral("cloud_psn_wrapper_type"), QStringLiteral("cloudPsnWrapperType") }, 0)).toInt();
+    if (psnWrapperType <= 0 && !privateIp.isEmpty()) {
+        const QStringList octets = privateIp.split(QLatin1Char('.'));
+        if (!octets.isEmpty())
+            psnWrapperType = octets.constLast().toInt();
+    }
+    const int cloudMtuIn = cloudplayFirstValue(connect, { QStringLiteral("mtu_in"), QStringLiteral("mtuIn"), QStringLiteral("cloud_mtu_in"), QStringLiteral("cloudMtuIn") },
+            cloudplayFirstValue(session, { QStringLiteral("mtu_in"), QStringLiteral("mtuIn"), QStringLiteral("cloud_mtu_in"), QStringLiteral("cloudMtuIn") }, 0)).toInt();
+    const int cloudMtuOut = cloudplayFirstValue(connect, { QStringLiteral("mtu_out"), QStringLiteral("mtuOut"), QStringLiteral("cloud_mtu_out"), QStringLiteral("cloudMtuOut") },
+            cloudplayFirstValue(session, { QStringLiteral("mtu_out"), QStringLiteral("mtuOut"), QStringLiteral("cloud_mtu_out"), QStringLiteral("cloudMtuOut") }, 0)).toInt();
+    const int rttMs = cloudplayFirstValue(connect, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") },
+            cloudplayFirstValue(session, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") }, 0)).toInt();
+
+    if (profileBlob.isEmpty() || publicHost.isEmpty() || cloudPort <= 0) {
+        qCWarning(chiakiGui) << "CloudPlay stream handoff missing host/profile/port"
+                             << "hasHost" << !publicHost.isEmpty()
+                             << "hasProfile" << !profileBlob.isEmpty()
+                             << "cloudPort" << cloudPort
+                             << "sessionKeys" << session.keys()
+                             << "connectKeys" << connect.keys();
+        emit error(tr("CloudPlay"), tr("CloudPlay session is missing host, port or profile."));
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QByteArray decoded = QByteArray::fromBase64(profileBlob.toUtf8());
+    const QJsonDocument doc = QJsonDocument::fromJson(decoded, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        emit error(tr("CloudPlay"), tr("CloudPlay profile is not valid."));
+        return false;
+    }
+
+    const QJsonObject hostPayload = doc.object().value(QStringLiteral("host")).toObject();
+    const QByteArray serverMac = cloudplayProfileKeyBytes(hostPayload.value(QStringLiteral("serverMac")).toString(), 6);
+    const QByteArray rpRegistKey = cloudplayProfileKeyBytes(hostPayload.value(QStringLiteral("rpRegistKey")).toString(), CHIAKI_SESSION_AUTH_SIZE);
+    const QByteArray rpKey = cloudplayProfileKeyBytes(hostPayload.value(QStringLiteral("rpKey")).toString(), 0x10);
+    if (serverMac.size() != 6 || rpRegistKey.size() != CHIAKI_SESSION_AUTH_SIZE || rpKey.size() != 0x10) {
+        qCWarning(chiakiGui) << "CloudPlay profile credential size mismatch"
+                             << "serverMac" << serverMac.size()
+                             << "rpRegistKey" << rpRegistKey.size()
+                             << "rpKey" << rpKey.size()
+                             << "hostKeys" << hostPayload.keys();
+        emit error(tr("CloudPlay"), tr("CloudPlay profile has invalid host credentials."));
+        return false;
+    }
+
+    ChiakiRegisteredHost chiakiHost = {};
+    chiakiHost.target = CHIAKI_TARGET_PS5_1;
+    memcpy(chiakiHost.server_mac, serverMac.constData(), sizeof(chiakiHost.server_mac));
+    const QString nickname = displayName.isEmpty() ? (slotId.isEmpty() ? QStringLiteral("CloudPlay PS5") : slotId) : displayName;
+    qstrncpy(chiakiHost.server_nickname, nickname.toUtf8().constData(), sizeof(chiakiHost.server_nickname));
+    memcpy(chiakiHost.rp_regist_key, rpRegistKey.constData(), sizeof(chiakiHost.rp_regist_key));
+    chiakiHost.rp_key_type = static_cast<uint32_t>(hostPayload.value(QStringLiteral("rpKeyType")).toInt(0));
+    memcpy(chiakiHost.rp_key, rpKey.constData(), sizeof(chiakiHost.rp_key));
+    const int consolePin = hostPayload.value(QStringLiteral("consolePin")).toInt(0);
+
+    RegisteredHost registeredHost(chiakiHost);
+    bool fullscreen = false, zoom = false, stretch = false;
+    switch (settings->GetWindowType()) {
+    case WindowType::Fullscreen: fullscreen = true; break;
+    case WindowType::Zoom: zoom = true; break;
+    case WindowType::Stretch: stretch = true; break;
+    default: break;
+    }
+    emit windowTypeUpdated(settings->GetWindowType());
+    window->setWindowAdjustable(false);
+
+    QString hostWithPort = publicHost;
+    if (!hostWithPort.contains(QLatin1Char(':')))
+        hostWithPort = QStringLiteral("%1:%2").arg(publicHost).arg(cloudPort);
+
+    StreamSessionConnectInfo info(
+            settings,
+            registeredHost.GetTarget(),
+            hostWithPort,
+            nickname,
+            registeredHost.GetRPRegistKey(),
+            registeredHost.GetRPKey(),
+            consolePin > 0 ? QString::number(consolePin) : QString(),
+            QString(),
+            false,
+            fullscreen,
+            zoom,
+            stretch);
+
+    if (!launchSpec.isEmpty() || !handshakeKey.isEmpty()) {
+        if (serviceTypeStr == QLatin1String("psnow"))
+            info.service_type = CHIAKI_SERVICE_TYPE_PSNOW;
+        else
+            info.service_type = CHIAKI_SERVICE_TYPE_PSCLOUD;
+        info.cloud_launch_spec = launchSpec;
+        info.cloud_handshake_key = handshakeKey;
+        info.cloud_session_id = cloudSessionId;
+        info.cloud_psn_wrapper_type = psnWrapperType > 0 ? static_cast<uint8_t>(psnWrapperType & 0xff) : 0;
+        info.cloud_mtu_in = cloudMtuIn > 0 ? static_cast<uint32_t>(cloudMtuIn) : 0;
+        info.cloud_mtu_out = cloudMtuOut > 0 ? static_cast<uint32_t>(cloudMtuOut) : 0;
+        info.cloud_rtt_us = rttMs > 0 ? static_cast<uint64_t>(rttMs) * 1000ULL : 0;
+        if (info.service_type == CHIAKI_SERVICE_TYPE_PSCLOUD)
+            info.video_profile.codec = CHIAKI_CODEC_H265;
+    }
+
+    qCInfo(chiakiGui) << "CloudPlay Pylux handoff"
+                       << "host" << publicHost
+                       << "cloudPort" << cloudPort
+                       << "service" << serviceTypeStr
+                       << "hasLaunch" << !launchSpec.isEmpty()
+                       << "hasHandshake" << !handshakeKey.isEmpty()
+                       << "hasCloudSession" << !cloudSessionId.isEmpty()
+                       << "psnWrapper" << psnWrapperType
+                       << "sessionKeys" << session.keys()
+                       << "connectKeys" << connect.keys();
+
+    createSession(info);
+    return true;
+}
 
 void QmlBackend::connectToHost(int index, QString nickname, QString gameName, QString titleId)
 {

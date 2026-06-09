@@ -23,6 +23,9 @@ concurrency:
 
 env:
   CHIAKI_ENABLE_STEAMWORKS: "OFF"
+  DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+  DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+  DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
 jobs:
   build-windows_x64-msys2:
     name: Build Pylux Windows x86_64
@@ -173,27 +176,43 @@ jobs:
           echo "INSTALLER_NAME=${INSTALLER_NAME}" >> $GITHUB_ENV
           echo "Renamed installer to: ${INSTALLER_NAME}"
 
+      - name: Upload Windows portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudplay-pylux-windows-portable-${{ env.CHIAKI_VERSION }}
+          path: ${{ env.RELEASE_PACKAGE_PATH }}
+          if-no-files-found: error
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudplay-pylux-windows-installer-${{ env.CHIAKI_VERSION }}
+          path: ${{ env.INSTALLER_NAME }}
+          if-no-files-found: error
+
       - name: Publish portable zip
+        if: ${{ env.DROPBOX_REFRESH_TOKEN != '' && env.DROPBOX_APP_KEY != '' && env.DROPBOX_APP_SECRET != '' }}
         id: zip
         uses: ./.github/actions/dropbox-publish
         with:
           file: ${{ env.RELEASE_PACKAGE_PATH }}
           latest-path: /pylux/windows/pylux${{ github.ref_name == 'release/beta' && '-beta' || '' }}-latest.zip
           versioned-path: /pylux/windows/pylux-${{ env.CHIAKI_VERSION }}.zip
-          refresh-token: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
-          app-key: ${{ secrets.DROPBOX_APP_KEY }}
-          app-secret: ${{ secrets.DROPBOX_APP_SECRET }}
+          refresh-token: ${{ env.DROPBOX_REFRESH_TOKEN }}
+          app-key: ${{ env.DROPBOX_APP_KEY }}
+          app-secret: ${{ env.DROPBOX_APP_SECRET }}
 
       - name: Publish installer
+        if: ${{ env.DROPBOX_REFRESH_TOKEN != '' && env.DROPBOX_APP_KEY != '' && env.DROPBOX_APP_SECRET != '' }}
         id: installer
         uses: ./.github/actions/dropbox-publish
         with:
           file: ${{ env.INSTALLER_NAME }}
           latest-path: /pylux/windows/pylux-windows-installer${{ github.ref_name == 'release/beta' && '-beta' || '' }}-latest.exe
           versioned-path: /pylux/windows/pylux-windows-installer-${{ env.CHIAKI_VERSION }}.exe
-          refresh-token: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
-          app-key: ${{ secrets.DROPBOX_APP_KEY }}
-          app-secret: ${{ secrets.DROPBOX_APP_SECRET }}
+          refresh-token: ${{ env.DROPBOX_REFRESH_TOKEN }}
+          app-key: ${{ env.DROPBOX_APP_KEY }}
+          app-secret: ${{ env.DROPBOX_APP_SECRET }}
 
       - name: Build summary
         if: always()

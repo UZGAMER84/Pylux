@@ -31,5 +31,67 @@
     <file>game_shortcut_icon.png</file>
     <file>game_shortcut_logo.png</file>
     <file>steamdeck-controls.png</file>
+    <file>chiaking.svg</file>
+    <file>chiaking-logo.svg</file>
+    <file>chiaking-logo-white.svg</file>
+    <file>cloudplay-console-logo.png</file>
+    <file>cloudplay-hero-dashboard.png</file>
+    <file>cloudplay-game-1.png</file>
+    <file>cloudplay-game-2.png</file>
+    <file>cloudplay-game-3.png</file>
+    <file>cloudplay-game-4.png</file>
+    <file>cloudplay-game-5.png</file>
+    <file>cloudplay-referral.png</file>
+    <file>cloudplay-support.png</file>
+    <file>cloudplay-hero-art.svg</file>
+    <file>cloudplay-console-main-bg.png</file>
+    <file>cp-home.svg</file>
+    <file>cp-gamepad.svg</file>
+    <file>cp-keyboard.svg</file>
+    <file>cp-library.svg</file>
+    <file>cp-sessions.svg</file>
+    <file>cp-user.svg</file>
+    <file>cp-support.svg</file>
+    <file>cp-settings.svg</file>
+    <file>cp-bell.svg</file>
+    <file>cp-clock.svg</file>
+    <file>cp-console.svg</file>
+    <file>cp-display.svg</file>
+    <file>cp-check.svg</file>
+    <file>cp-wallet.svg</file>
+    <file>cp-play.svg</file>
+    <file>cp-refresh.svg</file>
+    <file>cp-login.svg</file>
+    <file>cp-ps-cross.svg</file>
+    <file>cp-ps-circle.svg</file>
+    <file>cp-ps-square.svg</file>
+    <file>cp-ps-triangle.svg</file>
+    <file>cp-ps-dpad-up.svg</file>
+    <file>cp-ps-dpad-down.svg</file>
+    <file>cp-ps-dpad-left.svg</file>
+    <file>cp-ps-dpad-right.svg</file>
+    <file>cp-ps-l1.svg</file>
+    <file>cp-ps-r1.svg</file>
+    <file>cp-ps-l2.svg</file>
+    <file>cp-ps-r2.svg</file>
+    <file>cp-ps-l3.svg</file>
+    <file>cp-ps-r3.svg</file>
+    <file>cp-ps-options.svg</file>
+    <file>cp-ps-share.svg</file>
+    <file>cp-ps-touchpad.svg</file>
+    <file>cp-ps-ps.svg</file>
+    <file>cp-ps-mic.svg</file>
+    <file>cp-ps-stick-l-right.svg</file>
+    <file>cp-ps-stick-l-left.svg</file>
+    <file>cp-ps-stick-l-up.svg</file>
+    <file>cp-ps-stick-l-down.svg</file>
+    <file>cp-ps-stick-l-x.svg</file>
+    <file>cp-ps-stick-l-y.svg</file>
+    <file>cp-ps-stick-r-right.svg</file>
+    <file>cp-ps-stick-r-left.svg</file>
+    <file>cp-ps-stick-r-up.svg</file>
+    <file>cp-ps-stick-r-down.svg</file>
+    <file>cp-ps-stick-r-x.svg</file>
+    <file>cp-ps-stick-r-y.svg</file>
   </qresource>
 </RCC>
