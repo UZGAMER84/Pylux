@@ -51,6 +51,8 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QTcpSocket>
+#include <QFile>
+#include <QTextStream>
 #include <QUuid>
 #include <algorithm>
 
@@ -1544,6 +1546,15 @@ void QmlBackend::setWebEngineHints(QQuickWebEngineProfile *profile)
 }
 #endif
 
+static void cloudplayDebugLog(const QString &message)
+{
+    QFile file(QStringLiteral("C:/CloudPlay/cloudplay-pylux-debug.log"));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        return;
+    QTextStream out(&file);
+    out << QDateTime::currentDateTime().toString(Qt::ISODateWithMs) << " " << message << Qt::endl;
+}
+
 static QByteArray cloudplayProfileKeyBytes(QString value, int expectedSize)
 {
     const QString raw = value.trimmed();
@@ -1636,15 +1647,21 @@ bool QmlBackend::cloudPlayEnvFlag(const QString &name) const
 bool QmlBackend::cloudPlayCanReach(const QString &host, int port, int timeoutMs)
 {
     const QString cleanHost = host.trimmed();
-    if (cleanHost.isEmpty() || port <= 0)
+    if (cleanHost.isEmpty() || port <= 0) {
+        cloudplayDebugLog(QStringLiteral("canReach invalid host='%1' port=%2 timeout=%3").arg(cleanHost).arg(port).arg(timeoutMs));
         return false;
+    }
     QTcpSocket socket;
     socket.connectToHost(cleanHost, static_cast<quint16>(port));
-    return socket.waitForConnected(timeoutMs > 0 ? timeoutMs : 1800);
+    const bool ok = socket.waitForConnected(timeoutMs > 0 ? timeoutMs : 1800);
+    cloudplayDebugLog(QStringLiteral("canReach host=%1 port=%2 timeout=%3 ok=%4 error=%5")
+            .arg(cleanHost).arg(port).arg(timeoutMs).arg(ok).arg(socket.errorString()));
+    return ok;
 }
 
 bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
 {
+    cloudplayDebugLog(QStringLiteral("startStream enter payloadKeys=%1").arg(sessionPayload.keys().join(QLatin1Char(','))));
     const QVariantMap session = cloudplayNormalizeSessionPayload(sessionPayload);
     const QVariantMap connect = cloudplayConnectPayload(session);
     QVariantMap profileMap = cloudplayFirstMap(connect, {
@@ -1732,6 +1749,9 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             cloudplayFirstValue(session, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") }, 0)).toInt();
 
     if (profileBlob.isEmpty() || publicHost.isEmpty() || cloudPort <= 0) {
+        cloudplayDebugLog(QStringLiteral("startStream missing hasHost=%1 hasProfile=%2 cloudPort=%3 sessionKeys=%4 connectKeys=%5")
+                .arg(!publicHost.isEmpty()).arg(!profileBlob.isEmpty()).arg(cloudPort)
+                .arg(session.keys().join(QLatin1Char(','))).arg(connect.keys().join(QLatin1Char(','))));
         qCWarning(chiakiGui) << "CloudPlay stream handoff missing host/profile/port"
                              << "hasHost" << !publicHost.isEmpty()
                              << "hasProfile" << !profileBlob.isEmpty()
@@ -1746,6 +1766,8 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     const QByteArray decoded = QByteArray::fromBase64(profileBlob.toUtf8());
     const QJsonDocument doc = QJsonDocument::fromJson(decoded, &parseError);
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        cloudplayDebugLog(QStringLiteral("startStream profile parse error=%1 decodedSize=%2 blobSize=%3")
+                .arg(parseError.errorString()).arg(decoded.size()).arg(profileBlob.size()));
         emit error(tr("CloudPlay"), tr("CloudPlay profile is not valid."));
         return false;
     }
@@ -1755,6 +1777,8 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     const QByteArray rpRegistKey = cloudplayProfileKeyBytes(hostPayload.value(QStringLiteral("rpRegistKey")).toString(), CHIAKI_SESSION_AUTH_SIZE);
     const QByteArray rpKey = cloudplayProfileKeyBytes(hostPayload.value(QStringLiteral("rpKey")).toString(), 0x10);
     if (serverMac.size() != 6 || rpRegistKey.size() != CHIAKI_SESSION_AUTH_SIZE || rpKey.size() != 0x10) {
+        cloudplayDebugLog(QStringLiteral("startStream credential mismatch serverMac=%1 rpRegistKey=%2 rpKey=%3 hostKeys=%4")
+                .arg(serverMac.size()).arg(rpRegistKey.size()).arg(rpKey.size()).arg(hostPayload.keys().join(QLatin1Char(','))));
         qCWarning(chiakiGui) << "CloudPlay profile credential size mismatch"
                              << "serverMac" << serverMac.size()
                              << "rpRegistKey" << rpRegistKey.size()
@@ -1837,7 +1861,11 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
                        << "sessionKeys" << session.keys()
                        << "connectKeys" << connect.keys();
 
+    cloudplayDebugLog(QStringLiteral("startStream createSession hostWithPort=%1 ctrl=%2 stream=%3 senkusha=%4 service=%5 hasLaunch=%6 hasHandshake=%7 cloudSession=%8 psnWrapper=%9")
+            .arg(hostWithPort).arg(ctrlPort).arg(streamPort).arg(senkushaPort).arg(serviceTypeStr)
+            .arg(!launchSpec.isEmpty()).arg(!handshakeKey.isEmpty()).arg(!cloudSessionId.isEmpty()).arg(psnWrapperType));
     createSession(info);
+    cloudplayDebugLog(QStringLiteral("startStream createSession returned"));
     return true;
 }
 
