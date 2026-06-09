@@ -54,6 +54,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QUuid>
+#include <QSettings>
 #include <algorithm>
 
 #define PSN_DEVICES_TRIES 2
@@ -142,6 +143,13 @@ QmlBackend::QmlBackend(Settings *settings, QmlMainWindow *window, SteamworksWrap
     qmlRegisterSingletonInstance(uri, 1, 0, "DonationManager", donationManager);
     cloud_streaming_backend = new CloudStreamingBackend(settings, this);
     cloud_catalog_backend = new CloudCatalogBackend(settings, this);
+    cloudplay_billing_manager = new QNetworkAccessManager(this);
+    cloudplay_heartbeat_timer = new QTimer(this);
+    cloudplay_heartbeat_timer->setInterval(30000);
+    connect(cloudplay_heartbeat_timer, &QTimer::timeout, this, [this]() {
+        if (cloudplay_stream_active && !cloudplay_billing_session_id.isEmpty())
+            cloudPlayPostSessionAction(QStringLiteral("heartbeat"), QJsonObject{{QStringLiteral("platform"), QStringLiteral("windows")}});
+    });
     
     // Connect cloud streaming backend to register sessions
     connect(cloud_streaming_backend, &CloudStreamingBackend::sessionCreated, this, 
@@ -200,6 +208,7 @@ QmlBackend::QmlBackend(Settings *settings, QmlMainWindow *window, SteamworksWrap
 
         // Connect session quit handler
         connect(session, &StreamSession::SessionQuit, this, [this](ChiakiQuitReason reason, const QString &reason_str) {
+            cloudPlayNativeQuitForBilling(QStringLiteral("stream_quit"));
             if (chiaki_quit_reason_is_error(reason)) {
                 QString m = tr("Pylux Session has quit") + ":\n" + chiaki_quit_reason_string(reason);
                 if (!reason_str.isEmpty())
@@ -224,6 +233,7 @@ QmlBackend::QmlBackend(Settings *settings, QmlMainWindow *window, SteamworksWrap
         connect(session, &StreamSession::ConnectedChanged, this, [this]() {
             if (session->IsConnected()) {
                 setDiscoveryEnabled(false);
+                cloudPlayNativeConnectedForBilling();
                 emit cloudPlayNativeConnected();
             }
         });
@@ -1163,6 +1173,7 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
     });
 
     connect(session, &StreamSession::SessionQuit, this, [this](ChiakiQuitReason reason, const QString &reason_str) {
+        cloudPlayNativeQuitForBilling(QStringLiteral("stream_quit"));
         if (chiaki_quit_reason_is_error(reason)) {
             QString m = tr("Pylux Session has quit") + ":\n" + chiaki_quit_reason_string(reason);
             if (!reason_str.isEmpty())
@@ -1214,6 +1225,7 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
     connect(session, &StreamSession::ConnectedChanged, this, [this]() {
         if (session->IsConnected()) {
             setDiscoveryEnabled(false);
+            cloudPlayNativeConnectedForBilling();
             emit cloudPlayNativeConnected();
         }
     });
@@ -1649,6 +1661,93 @@ bool QmlBackend::cloudPlayEnvFlag(const QString &name) const
     return value == QStringLiteral("1") || value == QStringLiteral("true") || value == QStringLiteral("yes") || value == QStringLiteral("on");
 }
 
+void QmlBackend::cloudPlayResetBillingState(const QString &sessionId)
+{
+    cloudplay_billing_session_id = sessionId.trimmed();
+    cloudplay_stream_connected_notified = false;
+    cloudplay_stream_active = false;
+    if (cloudplay_heartbeat_timer)
+        cloudplay_heartbeat_timer->stop();
+    cloudplayDebugLog(QStringLiteral("billing reset session=%1").arg(cloudplay_billing_session_id));
+}
+
+QString QmlBackend::cloudPlayAccessToken() const
+{
+    QSettings cloudSettings;
+    cloudSettings.beginGroup(QStringLiteral("CloudPlayApi"));
+    QString token = cloudSettings.value(QStringLiteral("accessToken")).toString().trimmed();
+    cloudSettings.endGroup();
+    if (token.isEmpty())
+        token = QSettings().value(QStringLiteral("CloudPlayApi/accessToken")).toString().trimmed();
+    return token;
+}
+
+void QmlBackend::cloudPlayPostSessionAction(const QString &action, const QJsonObject &body)
+{
+    if (cloudplay_billing_session_id.isEmpty()) {
+        cloudplayDebugLog(QStringLiteral("billing skip action=%1 no_session").arg(action));
+        return;
+    }
+    const QString token = cloudPlayAccessToken();
+    if (token.isEmpty()) {
+        cloudplayDebugLog(QStringLiteral("billing skip action=%1 no_token session=%2").arg(action, cloudplay_billing_session_id));
+        return;
+    }
+    if (!cloudplay_billing_manager)
+        cloudplay_billing_manager = new QNetworkAccessManager(this);
+
+    QNetworkRequest request(QUrl(QStringLiteral("https://ps-api.cloudplay.uz/api/sessions/%1/%2")
+            .arg(cloudplay_billing_session_id, action)));
+    request.setRawHeader("Accept", "application/json");
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + token.toUtf8());
+
+    QJsonObject payload = body;
+    if (!payload.contains(QStringLiteral("platform")))
+        payload.insert(QStringLiteral("platform"), QStringLiteral("windows"));
+    QNetworkReply *reply = cloudplay_billing_manager->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, action]() {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
+        cloudplayDebugLog(QStringLiteral("billing action=%1 status=%2 ok=%3 err=%4 session=%5")
+                .arg(action).arg(status).arg(ok).arg(reply->errorString(), cloudplay_billing_session_id));
+        if (action == QStringLiteral("stream-connected") && ok) {
+            cloudplay_stream_active = true;
+            if (cloudplay_heartbeat_timer && !cloudplay_heartbeat_timer->isActive())
+                cloudplay_heartbeat_timer->start();
+        }
+        if (action == QStringLiteral("stop")) {
+            cloudplay_stream_active = false;
+            if (cloudplay_heartbeat_timer)
+                cloudplay_heartbeat_timer->stop();
+        }
+        reply->deleteLater();
+    });
+}
+
+void QmlBackend::cloudPlayNativeConnectedForBilling()
+{
+    if (cloudplay_billing_session_id.isEmpty()) {
+        cloudplayDebugLog(QStringLiteral("billing native_connected no_session"));
+        return;
+    }
+    if (cloudplay_stream_connected_notified) {
+        cloudplayDebugLog(QStringLiteral("billing native_connected already_notified session=%1").arg(cloudplay_billing_session_id));
+        return;
+    }
+    cloudplay_stream_connected_notified = true;
+    cloudplayDebugLog(QStringLiteral("billing native_connected posting stream-connected session=%1").arg(cloudplay_billing_session_id));
+    cloudPlayPostSessionAction(QStringLiteral("stream-connected"), QJsonObject{{QStringLiteral("platform"), QStringLiteral("windows")}});
+}
+
+void QmlBackend::cloudPlayNativeQuitForBilling(const QString &reason)
+{
+    if (!cloudplay_stream_active || cloudplay_billing_session_id.isEmpty())
+        return;
+    cloudplayDebugLog(QStringLiteral("billing native_quit posting stop session=%1 reason=%2").arg(cloudplay_billing_session_id, reason));
+    cloudPlayPostSessionAction(QStringLiteral("stop"), QJsonObject{{QStringLiteral("platform"), QStringLiteral("windows")}, {QStringLiteral("reason"), reason}});
+}
+
 bool QmlBackend::cloudPlayCanReach(const QString &host, int port, int timeoutMs)
 {
     const QString cleanHost = host.trimmed();
@@ -1675,6 +1774,9 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     // returns a real cloud launch/handshake payload through a separate path.
     const QVariantMap session = cloudplayNormalizeSessionPayload(sessionPayload);
     const QVariantMap connect = cloudplayConnectPayload(session);
+    const QString cloudSessionId = cloudplayFirstValue(session, {
+            QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("id") }).toString();
+    cloudPlayResetBillingState(cloudSessionId);
 
     QVariantMap profileMap = cloudplayFirstMap(connect, {
             QStringLiteral("profile"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob") });
@@ -1956,6 +2058,7 @@ void QmlBackend::stopSession(bool sleep)
     if (sleep)
         session->GoToBed();
 
+    cloudPlayNativeQuitForBilling(QStringLiteral("user_stop"));
     session->Stop();
 }
 

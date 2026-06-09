@@ -14,8 +14,11 @@
 #include <QUrl>
 #include <QFutureWatcher>
 #include <QFuture>
+#include <QJsonObject>
 
 class QNetworkAccessManager;
+class QNetworkReply;
+class QTimer;
 class QmlGamesBackend;
 
 // pylux Configuration
@@ -347,6 +350,11 @@ private:
     uint32_t getStreamShortcut() const;
     void updateStreamShortcut();
     QString getExecutable();
+    void cloudPlayResetBillingState(const QString &sessionId);
+    QString cloudPlayAccessToken() const;
+    void cloudPlayPostSessionAction(const QString &action, const QJsonObject &body = QJsonObject());
+    void cloudPlayNativeConnectedForBilling();
+    void cloudPlayNativeQuitForBilling(const QString &reason);
 
     Settings *settings = {};
     QmlSettings *settings_qml = {};
@@ -367,6 +375,11 @@ private:
     QHash<int, QmlController*> controllers;
     DisplayServer regist_dialog_server;
     StreamSessionConnectInfo session_info = {};
+    QNetworkAccessManager *cloudplay_billing_manager = {};
+    QTimer *cloudplay_heartbeat_timer = {};
+    QString cloudplay_billing_session_id;
+    bool cloudplay_stream_connected_notified = false;
+    bool cloudplay_stream_active = false;
     SystemdInhibit *sleep_inhibit = {};
 #ifdef Q_OS_MACOS
     MacWakeSleep *mac_wake_sleep = {};
