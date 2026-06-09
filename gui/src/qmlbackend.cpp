@@ -1719,9 +1719,13 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") },
             cloudplayFirstValue(session, {
                     QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") })).toString().trimmed();
-    const QString serviceTypeStr = cloudplayFirstValue(connect, {
+    const QString requestedServiceTypeStr = cloudplayFirstValue(connect, {
             QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") },
-            cloudplayFirstValue(session, { QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") }, QStringLiteral("pscloud"))).toString().trimmed().toLower();
+            cloudplayFirstValue(session, { QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") })).toString().trimmed().toLower();
+    const bool hasCloudGaikaiPayload = !launchSpec.isEmpty() && !handshakeKey.isEmpty();
+    const QString serviceTypeStr = !requestedServiceTypeStr.isEmpty()
+            ? requestedServiceTypeStr
+            : (hasCloudGaikaiPayload ? QStringLiteral("pscloud") : QStringLiteral("remoteplay"));
     const int cloudPort = cloudplayFirstValue(connect, {
             QStringLiteral("server_port"), QStringLiteral("serverPort"), QStringLiteral("cloud_port"), QStringLiteral("cloudPort"), QStringLiteral("port"),
             QStringLiteral("stream_port"), QStringLiteral("streamPort"), QStringLiteral("video_port"), QStringLiteral("videoPort") },
@@ -1748,13 +1752,14 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     const int rttMs = cloudplayFirstValue(connect, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") },
             cloudplayFirstValue(session, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") }, 0)).toInt();
 
-    if (profileBlob.isEmpty() || publicHost.isEmpty() || cloudPort <= 0) {
-        cloudplayDebugLog(QStringLiteral("startStream missing hasHost=%1 hasProfile=%2 cloudPort=%3 sessionKeys=%4 connectKeys=%5")
-                .arg(!publicHost.isEmpty()).arg(!profileBlob.isEmpty()).arg(cloudPort)
+    if (profileBlob.isEmpty() || publicHost.isEmpty() || ctrlPort <= 0) {
+        cloudplayDebugLog(QStringLiteral("startStream missing hasHost=%1 hasProfile=%2 ctrlPort=%3 cloudPort=%4 sessionKeys=%5 connectKeys=%6")
+                .arg(!publicHost.isEmpty()).arg(!profileBlob.isEmpty()).arg(ctrlPort).arg(cloudPort)
                 .arg(session.keys().join(QLatin1Char(','))).arg(connect.keys().join(QLatin1Char(','))));
         qCWarning(chiakiGui) << "CloudPlay stream handoff missing host/profile/port"
                              << "hasHost" << !publicHost.isEmpty()
                              << "hasProfile" << !profileBlob.isEmpty()
+                             << "ctrlPort" << ctrlPort
                              << "cloudPort" << cloudPort
                              << "sessionKeys" << session.keys()
                              << "connectKeys" << connect.keys();
@@ -1831,7 +1836,7 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     info.stream_port = streamPort > 0 ? static_cast<uint16_t>(streamPort) : 0;
     info.senkusha_port = senkushaPort > 0 ? static_cast<uint16_t>(senkushaPort) : 0;
 
-    if (!launchSpec.isEmpty() || !handshakeKey.isEmpty()) {
+    if (hasCloudGaikaiPayload) {
         if (serviceTypeStr == QLatin1String("psnow"))
             info.service_type = CHIAKI_SERVICE_TYPE_PSNOW;
         else
