@@ -56,6 +56,7 @@ Pane {
     property bool cloudPlayStreamConnectedNotified: false
     property bool cloudPlayStopInFlight: false
     property int cloudPlayLaunchRetryCount: 0
+    property var cloudPlayFailedSlotIds: []
     property string selectedPackageTitle: ""
     property string selectedPackagePrice: ""
     property string supportDraft: ""
@@ -1758,7 +1759,10 @@ Pane {
         cloudPlayHeartbeatTimer.stop()
         if (activeSessionId.length === 0 || cloudPlayStopInFlight)
             return
-        var shouldRetry = (reason !== "user_stop" && reason !== "app_close" && reason !== "manual_stop" && reason !== "autotest_complete") && cloudPlayLaunchRetryCount < 2
+        var shouldRetry = (reason !== "user_stop" && reason !== "app_close" && reason !== "manual_stop" && reason !== "autotest_complete") && cloudPlayLaunchRetryCount < 4
+        var failedSlotId = String(activeSlotId || "")
+        if (failedSlotId.length > 0 && cloudPlayFailedSlotIds.indexOf(failedSlotId) < 0)
+            cloudPlayFailedSlotIds = cloudPlayFailedSlotIds.concat([failedSlotId])
         cloudPlayLaunchRetryCount += 1
         var statusText = shouldRetry ? consolePane.trText("PS5 не ответила · пробуем другую…") : consolePane.trText("PS5 не ответила")
         apiStatusText = statusText
@@ -1898,6 +1902,8 @@ Pane {
         var startBody = { platform: updatePlatformKey() }
         if (allocationMode && String(allocationMode).length > 0)
             startBody.allocation_mode = String(allocationMode)
+        if (cloudPlayFailedSlotIds.length > 0)
+            startBody.exclude_slot_ids = cloudPlayFailedSlotIds.slice(0)
         request("POST", "/sessions/start", startBody, true, function(ok, status, payload) {
             apiBusy = false
             if (!ok) {
@@ -2007,7 +2013,8 @@ Pane {
         var stopReason = reason || "user_stop"
         pendingStreamSession = null
         streamStartTimer.stop()
-        cloudPlayLaunchRetryCount = 0
+        if (["connect_failed", "preflight_failed", "stream_quit"].indexOf(String(stopReason)) < 0)
+            cloudPlayLaunchRetryCount = 0
         cloudPlayStopInFlight = true
         cloudPlayStreamMonitorTimer.stop()
         cloudPlayHeartbeatTimer.stop()
@@ -2290,6 +2297,7 @@ Pane {
         streamActive = false
         nativeStreamStarting = false
         cloudPlayLaunchRetryCount = 0
+        cloudPlayFailedSlotIds = []
         launchStep = 0
         launchProgress = 0.08
         launchStatusText = consolePane.trText("Подключаем…")
