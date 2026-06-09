@@ -1725,6 +1725,12 @@ Pane {
             return
         }
         nativeStreamSessionSeen = true
+        var sessionElapsed = nativeStreamStartedAtMs > 0 ? (Date.now() - nativeStreamStartedAtMs) : 0
+        if (nativeStreamStarting && nativeStreamConnectedSinceMs <= 0 && sessionElapsed > 15000) {
+            console.log("CloudPlay start_flow native_start_timeout session=" + activeSessionId + " elapsedMs=" + sessionElapsed)
+            handleCloudPlayNativeSessionFailed("connect_failed")
+            return
+        }
         if (Chiaki.session.connected) {
             if (nativeStreamConnectedSinceMs <= 0) {
                 nativeStreamConnectedSinceMs = Date.now()
