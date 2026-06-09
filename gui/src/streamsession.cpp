@@ -14,8 +14,20 @@
 
 #include <QKeyEvent>
 #include <QtMath>
+#include <QFile>
+#include <QTextStream>
+#include <QDateTime>
 
 #include <cstring>
+
+static void cloudplayStreamDebugLog(const QString &message)
+{
+    QFile file(QStringLiteral("C:/CloudPlay/cloudplay-pylux-debug.log"));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        return;
+    QTextStream out(&file);
+    out << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) << " streamsession " << message << '\n';
+}
 
 #define SETSU_UPDATE_INTERVAL_MS 4
 #define STEAMDECK_UPDATE_INTERVAL_MS 4
@@ -1928,11 +1940,16 @@ void StreamSession::Event(ChiakiEvent *event)
 	switch(event->type)
 	{
 		case CHIAKI_EVENT_CONNECTED:
+			cloudplayStreamDebugLog(QStringLiteral("event CONNECTED"));
 			connect_timer.invalidate();
 			connected = true;
 			emit ConnectedChanged();
 			break;
 		case CHIAKI_EVENT_QUIT:
+			cloudplayStreamDebugLog(QStringLiteral("event QUIT reason=%1 detail=%2 connected=%3")
+					.arg(static_cast<int>(event->quit.reason))
+					.arg(event->quit.reason_str ? QString::fromUtf8(event->quit.reason_str) : QString())
+					.arg(connected ? 1 : 0));
 			// Do not auto-retry when the console reports RP crashed or session in use — rapid
 			// sess/init loops stress the console and match the repeated 403 + 0x80108b15 pattern.
 			if(!connected && !holepunch_session && chiaki_quit_reason_is_error(event->quit.reason)
