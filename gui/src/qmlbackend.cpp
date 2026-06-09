@@ -1667,8 +1667,15 @@ bool QmlBackend::cloudPlayCanReach(const QString &host, int port, int timeoutMs)
 bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
 {
     cloudplayDebugLog(QStringLiteral("startStream enter payloadKeys=%1").arg(sessionPayload.keys().join(QLatin1Char(','))));
+
+    // CloudPlay backend reservations are ordinary PS5 Remote Play sessions
+    // exposed through NAT ports. This intentionally mirrors the previous
+    // working Windows CloudPlay Console build on the desktop: do not route
+    // these payloads into Pylux/Gaikai PSCloud mode unless a future backend
+    // returns a real cloud launch/handshake payload through a separate path.
     const QVariantMap session = cloudplayNormalizeSessionPayload(sessionPayload);
     const QVariantMap connect = cloudplayConnectPayload(session);
+
     QVariantMap profileMap = cloudplayFirstMap(connect, {
             QStringLiteral("profile"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob") });
     if (profileMap.isEmpty())
@@ -1680,7 +1687,7 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             cloudplayFirstValue(profileMap, {
                     QStringLiteral("blob"), QStringLiteral("profile_blob"), QStringLiteral("profileBlob"),
                     QStringLiteral("data"), QStringLiteral("base64") })).toString().trimmed();
-    const QString publicHost = cloudplayFirstValue(connect, {
+    const QString host = cloudplayFirstValue(connect, {
             QStringLiteral("host"), QStringLiteral("external_host"), QStringLiteral("externalHost"),
             QStringLiteral("remote_host"), QStringLiteral("remoteHost"), QStringLiteral("public_host"),
             QStringLiteral("publicHost"), QStringLiteral("address"), QStringLiteral("addr") },
@@ -1712,62 +1719,11 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             cloudplayFirstValue(session, {
                     QStringLiteral("senkusha_port"), QStringLiteral("senkushaPort"),
                     QStringLiteral("control_udp_port"), QStringLiteral("controlUdpPort") }, 9297)).toInt();
-    const QString launchSpec = cloudplayFirstValue(connect, {
-            QStringLiteral("launch_spec"), QStringLiteral("launchSpec"), QStringLiteral("cloud_launch_spec"), QStringLiteral("cloudLaunchSpec") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("launch_spec"), QStringLiteral("launchSpec"), QStringLiteral("cloud_launch_spec"), QStringLiteral("cloudLaunchSpec") })).toString().trimmed();
-    const QString handshakeKey = cloudplayFirstValue(connect, {
-            QStringLiteral("handshake_key"), QStringLiteral("handshakeKey"), QStringLiteral("cloud_handshake_key"), QStringLiteral("cloudHandshakeKey") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("handshake_key"), QStringLiteral("handshakeKey"), QStringLiteral("cloud_handshake_key"), QStringLiteral("cloudHandshakeKey") })).toString().trimmed();
-    const QString cloudSessionId = cloudplayFirstValue(connect, {
-            QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("session_id"), QStringLiteral("sessionId"), QStringLiteral("cloud_session_id"), QStringLiteral("cloudSessionId"), QStringLiteral("id") })).toString().trimmed();
-    const QString requestedServiceTypeStr = cloudplayFirstValue(connect, {
-            QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") },
-            cloudplayFirstValue(session, { QStringLiteral("service_type"), QStringLiteral("serviceType"), QStringLiteral("type") })).toString().trimmed().toLower();
-    const bool hasCloudGaikaiPayload = !launchSpec.isEmpty() && !handshakeKey.isEmpty();
-    const QString serviceTypeStr = !requestedServiceTypeStr.isEmpty()
-            ? requestedServiceTypeStr
-            : (hasCloudGaikaiPayload ? QStringLiteral("pscloud") : QStringLiteral("remoteplay"));
-    const int cloudPort = cloudplayFirstValue(connect, {
-            QStringLiteral("server_port"), QStringLiteral("serverPort"), QStringLiteral("cloud_port"), QStringLiteral("cloudPort"), QStringLiteral("port"),
-            QStringLiteral("stream_port"), QStringLiteral("streamPort"), QStringLiteral("video_port"), QStringLiteral("videoPort") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("server_port"), QStringLiteral("serverPort"), QStringLiteral("cloud_port"), QStringLiteral("cloudPort"), QStringLiteral("port"),
-                    QStringLiteral("stream_port"), QStringLiteral("streamPort"), QStringLiteral("video_port"), QStringLiteral("videoPort") }, 0)).toInt();
-    const QString privateIp = cloudplayFirstValue(connect, {
-            QStringLiteral("private_ip"), QStringLiteral("privateIp"), QStringLiteral("psn_private_ip"), QStringLiteral("psnPrivateIp") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("private_ip"), QStringLiteral("privateIp"), QStringLiteral("psn_private_ip"), QStringLiteral("psnPrivateIp") })).toString().trimmed();
-    int psnWrapperType = cloudplayFirstValue(connect, {
-            QStringLiteral("psn_wrapper_type"), QStringLiteral("psnWrapperType"), QStringLiteral("cloud_psn_wrapper_type"), QStringLiteral("cloudPsnWrapperType") },
-            cloudplayFirstValue(session, {
-                    QStringLiteral("psn_wrapper_type"), QStringLiteral("psnWrapperType"), QStringLiteral("cloud_psn_wrapper_type"), QStringLiteral("cloudPsnWrapperType") }, 0)).toInt();
-    if (psnWrapperType <= 0 && !privateIp.isEmpty()) {
-        const QStringList octets = privateIp.split(QLatin1Char('.'));
-        if (!octets.isEmpty())
-            psnWrapperType = octets.constLast().toInt();
-    }
-    const int cloudMtuIn = cloudplayFirstValue(connect, { QStringLiteral("mtu_in"), QStringLiteral("mtuIn"), QStringLiteral("cloud_mtu_in"), QStringLiteral("cloudMtuIn") },
-            cloudplayFirstValue(session, { QStringLiteral("mtu_in"), QStringLiteral("mtuIn"), QStringLiteral("cloud_mtu_in"), QStringLiteral("cloudMtuIn") }, 0)).toInt();
-    const int cloudMtuOut = cloudplayFirstValue(connect, { QStringLiteral("mtu_out"), QStringLiteral("mtuOut"), QStringLiteral("cloud_mtu_out"), QStringLiteral("cloudMtuOut") },
-            cloudplayFirstValue(session, { QStringLiteral("mtu_out"), QStringLiteral("mtuOut"), QStringLiteral("cloud_mtu_out"), QStringLiteral("cloudMtuOut") }, 0)).toInt();
-    const int rttMs = cloudplayFirstValue(connect, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") },
-            cloudplayFirstValue(session, { QStringLiteral("rtt"), QStringLiteral("rtt_ms"), QStringLiteral("rttMs") }, 0)).toInt();
 
-    if (profileBlob.isEmpty() || publicHost.isEmpty() || ctrlPort <= 0) {
-        cloudplayDebugLog(QStringLiteral("startStream missing hasHost=%1 hasProfile=%2 ctrlPort=%3 cloudPort=%4 sessionKeys=%5 connectKeys=%6")
-                .arg(!publicHost.isEmpty()).arg(!profileBlob.isEmpty()).arg(ctrlPort).arg(cloudPort)
+    if (profileBlob.isEmpty() || host.isEmpty() || ctrlPort <= 0) {
+        cloudplayDebugLog(QStringLiteral("startStream missing hasHost=%1 hasProfile=%2 ctrlPort=%3 sessionKeys=%4 connectKeys=%5")
+                .arg(!host.isEmpty()).arg(!profileBlob.isEmpty()).arg(ctrlPort)
                 .arg(session.keys().join(QLatin1Char(','))).arg(connect.keys().join(QLatin1Char(','))));
-        qCWarning(chiakiGui) << "CloudPlay stream handoff missing host/profile/port"
-                             << "hasHost" << !publicHost.isEmpty()
-                             << "hasProfile" << !profileBlob.isEmpty()
-                             << "ctrlPort" << ctrlPort
-                             << "cloudPort" << cloudPort
-                             << "sessionKeys" << session.keys()
-                             << "connectKeys" << connect.keys();
         emit error(tr("CloudPlay"), tr("CloudPlay session is missing host, port or profile."));
         return false;
     }
@@ -1789,11 +1745,6 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     if (serverMac.size() != 6 || rpRegistKey.size() != CHIAKI_SESSION_AUTH_SIZE || rpKey.size() != 0x10) {
         cloudplayDebugLog(QStringLiteral("startStream credential mismatch serverMac=%1 rpRegistKey=%2 rpKey=%3 hostKeys=%4")
                 .arg(serverMac.size()).arg(rpRegistKey.size()).arg(rpKey.size()).arg(hostPayload.keys().join(QLatin1Char(','))));
-        qCWarning(chiakiGui) << "CloudPlay profile credential size mismatch"
-                             << "serverMac" << serverMac.size()
-                             << "rpRegistKey" << rpRegistKey.size()
-                             << "rpKey" << rpKey.size()
-                             << "hostKeys" << hostPayload.keys();
         emit error(tr("CloudPlay"), tr("CloudPlay profile has invalid host credentials."));
         return false;
     }
@@ -1819,14 +1770,10 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     emit windowTypeUpdated(settings->GetWindowType());
     window->setWindowAdjustable(false);
 
-    QString hostForSession = publicHost;
-    if (hasCloudGaikaiPayload && !hostForSession.contains(QLatin1Char(':')))
-        hostForSession = QStringLiteral("%1:%2").arg(publicHost).arg(cloudPort > 0 ? cloudPort : (ctrlPort > 0 ? ctrlPort : 9295));
-
     StreamSessionConnectInfo info(
             settings,
             registeredHost.GetTarget(),
-            hostForSession,
+            host,
             nickname,
             registeredHost.GetRPRegistKey(),
             registeredHost.GetRPKey(),
@@ -1837,43 +1784,22 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
             zoom,
             stretch);
 
+    info.service_type = CHIAKI_SERVICE_TYPE_REMOTE_PLAY;
     info.ctrl_port = ctrlPort > 0 ? static_cast<uint16_t>(ctrlPort) : 0;
     info.stream_port = streamPort > 0 ? static_cast<uint16_t>(streamPort) : 0;
     info.senkusha_port = senkushaPort > 0 ? static_cast<uint16_t>(senkushaPort) : 0;
 
-    if (hasCloudGaikaiPayload) {
-        if (serviceTypeStr == QLatin1String("psnow"))
-            info.service_type = CHIAKI_SERVICE_TYPE_PSNOW;
-        else
-            info.service_type = CHIAKI_SERVICE_TYPE_PSCLOUD;
-        info.cloud_launch_spec = launchSpec;
-        info.cloud_handshake_key = handshakeKey;
-        info.cloud_session_id = cloudSessionId;
-        info.cloud_psn_wrapper_type = psnWrapperType > 0 ? static_cast<uint8_t>(psnWrapperType & 0xff) : 0;
-        info.cloud_mtu_in = cloudMtuIn > 0 ? static_cast<uint32_t>(cloudMtuIn) : 0;
-        info.cloud_mtu_out = cloudMtuOut > 0 ? static_cast<uint32_t>(cloudMtuOut) : 0;
-        info.cloud_rtt_us = rttMs > 0 ? static_cast<uint64_t>(rttMs) * 1000ULL : 0;
-        if (info.service_type == CHIAKI_SERVICE_TYPE_PSCLOUD)
-            info.video_profile.codec = CHIAKI_CODEC_H265;
-    }
-
-    qCInfo(chiakiGui) << "CloudPlay Pylux handoff"
-                       << "host" << publicHost
-                       << "ctrlPort" << ctrlPort
-                       << "streamPort" << streamPort
-                       << "senkushaPort" << senkushaPort
-                       << "cloudPort" << cloudPort
-                       << "service" << serviceTypeStr
-                       << "hasLaunch" << !launchSpec.isEmpty()
-                       << "hasHandshake" << !handshakeKey.isEmpty()
-                       << "hasCloudSession" << !cloudSessionId.isEmpty()
-                       << "psnWrapper" << psnWrapperType
-                       << "sessionKeys" << session.keys()
-                       << "connectKeys" << connect.keys();
-
-    cloudplayDebugLog(QStringLiteral("startStream createSession host=%1 ctrl=%2 stream=%3 senkusha=%4 service=%5 hasLaunch=%6 hasHandshake=%7 cloudSession=%8 psnWrapper=%9")
-            .arg(hostForSession).arg(ctrlPort).arg(streamPort).arg(senkushaPort).arg(serviceTypeStr)
-            .arg(!launchSpec.isEmpty()).arg(!handshakeKey.isEmpty()).arg(!cloudSessionId.isEmpty()).arg(psnWrapperType));
+    qCInfo(chiakiGui) << "CloudPlay stream starting (old desktop remoteplay path)" << host
+                      << "ctrl" << info.ctrl_port
+                      << "stream" << info.stream_port
+                      << "senkusha" << info.senkusha_port
+                      << "profile" << info.video_profile.width << "x" << info.video_profile.height
+                      << info.video_profile.max_fps << "fps"
+                      << "bitrate" << info.video_profile.bitrate
+                      << "slot" << slotId
+                      << "profile_blob=redacted";
+    cloudplayDebugLog(QStringLiteral("startStream oldDesktopPath host=%1 ctrl=%2 stream=%3 senkusha=%4 service=remoteplay")
+            .arg(host).arg(info.ctrl_port).arg(info.stream_port).arg(info.senkusha_port));
     createSession(info);
     cloudplayDebugLog(QStringLiteral("startStream createSession returned"));
     return true;
