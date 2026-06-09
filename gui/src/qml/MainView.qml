@@ -52,6 +52,7 @@ Pane {
     property bool streamActive: false
     property bool nativeStreamStarting: false
     property double nativeStreamStartedAtMs: 0
+    property double nativeStreamConnectedSinceMs: 0
     property bool nativeStreamSessionSeen: false
     property bool cloudPlayStreamConnectedNotified: false
     property bool cloudPlayStopInFlight: false
@@ -1675,6 +1676,7 @@ Pane {
         streamActive = false
         nativeStreamStarting = false
         nativeStreamStartedAtMs = 0
+        nativeStreamConnectedSinceMs = 0
         nativeStreamSessionSeen = false
         cloudPlayStreamConnectedNotified = false
         if (statusText && statusText.length > 0)
@@ -1723,8 +1725,21 @@ Pane {
             return
         }
         nativeStreamSessionSeen = true
-        if (Chiaki.session.connected)
-            markCloudPlayNativeConnected()
+        if (Chiaki.session.connected) {
+            if (nativeStreamConnectedSinceMs <= 0) {
+                nativeStreamConnectedSinceMs = Date.now()
+                console.log("CloudPlay start_flow native_connected_pending session=" + activeSessionId)
+                return
+            }
+            // Pylux/Chiaki can briefly report control-level connected before the
+            // Remote Play app accepts the stream. When the console later reports
+            // "Remote Play already in use", that happens within a few seconds.
+            // Delay backend billing/stream-connected until the connection is stable.
+            if (Date.now() - nativeStreamConnectedSinceMs >= 10000)
+                markCloudPlayNativeConnected()
+        } else {
+            nativeStreamConnectedSinceMs = 0
+        }
     }
 
     function markCloudPlayNativeConnected() {
@@ -1754,6 +1769,7 @@ Pane {
 
     function handleCloudPlayNativeSessionFailed(reason) {
         nativeStreamStarting = false
+        nativeStreamConnectedSinceMs = 0
         streamActive = false
         cloudPlayStreamMonitorTimer.stop()
         cloudPlayHeartbeatTimer.stop()
