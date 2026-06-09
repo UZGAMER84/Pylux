@@ -134,7 +134,7 @@ jobs:
             cp tmp0.txt tmp.txt
             rm tmp0.txt
             sort -u tmp.txt -o tmp.txt
-            ldd $(<tmp.txt) | grep -v ":" | cut -d " " -f3 | grep -iv "system32" | grep -iv "windows" | grep -iv "winsxs" | grep -iv "not" | xargs -d $'\n' sh -c 'for arg do if [ -n "$arg" ] && [ ! -e "pylux/${arg##*/}" ]; then echo "Copied $arg"; cp "$arg" pylux/ ; echo "$arg" >> tmp0.txt; fi; done'
+            ldd $(<tmp.txt) | grep -v ":" | cut -d " " -f3 | grep -iv "system32" | grep -iv "windows" | grep -iv "winsxs" | grep -iv "not" | xargs -r -d $'\n' sh -c 'for arg do if [ -n "$arg" ] && [ ! -e "pylux/${arg##*/}" ]; then echo "Copied $arg"; cp "$arg" pylux/ ; echo "$arg" >> tmp0.txt; fi; done' || true
           done
           # Copy Qt plugins and QML modules
           windeployqt6.exe --no-translations --qmldir=gui/src/qml pylux/pylux.exe
@@ -150,7 +150,7 @@ jobs:
             cp tmp0.txt tmp.txt
             rm tmp0.txt
             sort -u tmp.txt -o tmp.txt
-            ldd $(<tmp.txt) 2>/dev/null | grep -v ":" | cut -d " " -f3 | grep -iv "system32" | grep -iv "windows" | grep -iv "winsxs" | grep -iv "not" | xargs -d $'\n' sh -c 'for arg do if [ -n "$arg" ] && [ ! -e "pylux/${arg##*/}" ]; then echo "  Copying plugin dependency: ${arg##*/}"; cp "$arg" pylux/ ; echo "$arg" >> tmp0.txt; fi; done'
+            ldd $(<tmp.txt) 2>/dev/null | grep -v ":" | cut -d " " -f3 | grep -iv "system32" | grep -iv "windows" | grep -iv "winsxs" | grep -iv "not" | xargs -r -d $'\n' sh -c 'for arg do if [ -n "$arg" ] && [ ! -e "pylux/${arg##*/}" ]; then echo "  Copying plugin dependency: ${arg##*/}"; cp "$arg" pylux/ ; echo "$arg" >> tmp0.txt; fi; done' || true
           done
           rm -f tmp0.txt tmp.txt
 
