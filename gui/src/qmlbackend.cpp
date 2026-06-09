@@ -65,6 +65,7 @@ static QMutex chiaki_log_mutex;
 static ChiakiLog *chiaki_log_ctx = nullptr;
 static ChiakiLog global_log;
 static QtMessageHandler qt_msg_handler = nullptr;
+static void cloudplayDebugLog(const QString &message);
 
 static void msg_handler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -1250,8 +1251,12 @@ void QmlBackend::createSession(const StreamSessionConnectInfo &connect_info)
         else
         {
             try {
+                cloudplayDebugLog(QStringLiteral("createSession before Start duidEmpty=%1 host=%2 ctrl=%3 stream=%4 senkusha=%5")
+                        .arg(session_info.duid.isEmpty()).arg(session_info.host).arg(session_info.ctrl_port).arg(session_info.stream_port).arg(session_info.senkusha_port));
                 session->Start();
+                cloudplayDebugLog(QStringLiteral("createSession after Start"));
             } catch (const Exception &e) {
+                cloudplayDebugLog(QStringLiteral("createSession Start exception=%1").arg(QString::fromUtf8(e.what())));
                 emit error(tr("Stream failed"), tr("Failed to start Stream Session: %1").arg(e.what()));
                 chiaki_log_mutex.lock();
                 chiaki_log_ctx = nullptr;
@@ -1814,14 +1819,14 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
     emit windowTypeUpdated(settings->GetWindowType());
     window->setWindowAdjustable(false);
 
-    QString hostWithPort = publicHost;
-    if (!hostWithPort.contains(QLatin1Char(':')))
-        hostWithPort = QStringLiteral("%1:%2").arg(publicHost).arg(ctrlPort > 0 ? ctrlPort : 9295);
+    QString hostForSession = publicHost;
+    if (hasCloudGaikaiPayload && !hostForSession.contains(QLatin1Char(':')))
+        hostForSession = QStringLiteral("%1:%2").arg(publicHost).arg(cloudPort > 0 ? cloudPort : (ctrlPort > 0 ? ctrlPort : 9295));
 
     StreamSessionConnectInfo info(
             settings,
             registeredHost.GetTarget(),
-            hostWithPort,
+            hostForSession,
             nickname,
             registeredHost.GetRPRegistKey(),
             registeredHost.GetRPKey(),
@@ -1866,8 +1871,8 @@ bool QmlBackend::cloudPlayStartStream(const QVariantMap &sessionPayload)
                        << "sessionKeys" << session.keys()
                        << "connectKeys" << connect.keys();
 
-    cloudplayDebugLog(QStringLiteral("startStream createSession hostWithPort=%1 ctrl=%2 stream=%3 senkusha=%4 service=%5 hasLaunch=%6 hasHandshake=%7 cloudSession=%8 psnWrapper=%9")
-            .arg(hostWithPort).arg(ctrlPort).arg(streamPort).arg(senkushaPort).arg(serviceTypeStr)
+    cloudplayDebugLog(QStringLiteral("startStream createSession host=%1 ctrl=%2 stream=%3 senkusha=%4 service=%5 hasLaunch=%6 hasHandshake=%7 cloudSession=%8 psnWrapper=%9")
+            .arg(hostForSession).arg(ctrlPort).arg(streamPort).arg(senkushaPort).arg(serviceTypeStr)
             .arg(!launchSpec.isEmpty()).arg(!handshakeKey.isEmpty()).arg(!cloudSessionId.isEmpty()).arg(psnWrapperType));
     createSession(info);
     cloudplayDebugLog(QStringLiteral("startStream createSession returned"));
