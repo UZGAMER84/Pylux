@@ -54,6 +54,7 @@ Pane {
     property double nativeStreamStartedAtMs: 0
     property double nativeStreamConnectedSinceMs: 0
     property bool nativeStreamSessionSeen: false
+    property bool nativeConnectedSignalPending: false
     property bool cloudPlayStreamConnectedNotified: false
     property bool cloudPlayStopInFlight: false
     property int cloudPlayLaunchRetryCount: 0
@@ -1068,6 +1069,8 @@ Pane {
             console.log("CloudPlay start_flow native_connected_signal session=" + consolePane.activeSessionId)
             if (consolePane.activeSessionId.length > 0)
                 consolePane.markCloudPlayNativeConnected()
+            else
+                consolePane.nativeConnectedSignalPending = true
         }
         function onCloudPlayNativeSessionQuit() {
             console.log("CloudPlay start_flow native_session_quit starting=" + consolePane.nativeStreamStarting + " active=" + consolePane.streamActive + " session=" + consolePane.activeSessionId)
@@ -1654,6 +1657,11 @@ Pane {
         connectPorts = "session " + (c.ctrl_port || c.ctrlPort || c.control_port || c.controlPort || c.session_port || c.sessionPort || c.remote_port || c.remotePort || "9295") + ", stream " + (c.stream_port || c.streamPort || c.video_port || c.videoPort || "9296") + ", wake " + (c.wake_port || c.wakePort || "9302")
         profileBlobReady = sessionProfileReady(session)
         apiStatusText = consolePane.trText("PS5 подготовлена · подключаем игру")
+        if (nativeConnectedSignalPending && activeSessionId.length > 0) {
+            console.log("CloudPlay start_flow applying_pending_native_connected session=" + activeSessionId)
+            nativeConnectedSignalPending = false
+            markCloudPlayNativeConnected()
+        }
     }
 
     function sessionControlPort(session) {
@@ -1678,6 +1686,7 @@ Pane {
         nativeStreamStartedAtMs = 0
         nativeStreamConnectedSinceMs = 0
         nativeStreamSessionSeen = false
+        nativeConnectedSignalPending = false
         cloudPlayStreamConnectedNotified = false
         if (statusText && statusText.length > 0)
             launchStatusText = statusText
